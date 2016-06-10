@@ -3,15 +3,22 @@ import os.path
 import re
 
 class Normalizer(object):
-    # Maps section name digits to actual alphabetical names of the section
-    section_name_mapper = {}
-    # Maps section name (alphabetical name along with digit) to section id
-    section_name_to_id = {}
-    # Maps section id to row id, and each row id is a dict that maps to row name
-    section_id_to_row = {}
 
     def __init__(self):
-        pass
+        # Maps section name digits to list of alphabetical names of section
+        # For example, if we see "Box Level 6" and "Top Deck 6" in the manifest,
+        # section_name_mapper['6'] will map to ['Box Level', 'Top Deck']
+        self.section_name_mapper = {}
+        # Maps section name (alphabetical name along with digit) to section id
+        # For example, if "Box Level 6" has section id "10", 
+        # section_name_to_id['Box Level 6'] will map to '10'
+        self.section_name_to_id = {}
+        # Maps section id to row name, and each row name is a dict that maps to 
+        # row id. Use this to find the row id given the section id and row name
+        # For example, if section 216 has a row with name 'a', and this row name
+        # has row id '1',
+        # section_id_to_row['216'] will map to {'a':'1'}
+        self.section_id_to_row = {}
 
     def read_manifest(self, manifest):
         """reads a manifest file
@@ -75,6 +82,8 @@ class Normalizer(object):
                     self.section_id_to_row[section_id][row_name] = row_id
                 else:
                     self.section_id_to_row[section_id] = {row_name: row_id}
+        print "section_id_to_row ", str(self.section_id_to_row)
+        print "section_name_to_id ", str(self.section_name_to_id)
 
     def compare_letters_with_phrase(self, letters, phrase):
         """Compares letters with phrase to see whether the letters
