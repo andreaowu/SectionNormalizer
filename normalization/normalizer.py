@@ -7,17 +7,18 @@ class Normalizer(object):
     def __init__(self):
         # Maps section name digits to list of alphabetical names of section
         # For example, if we see "Box Level 6" and "Top Deck 6" in the manifest,
-        # section_name_mapper['6'] will map to ['Box Level', 'Top Deck']
+        # section_name_mapper['6'] will get ['Box Level', 'Top Deck']
         self.section_name_mapper = {}
         # Maps section name (alphabetical name along with digit) to section id
         # For example, if "Box Level 6" has section id "10", 
-        # section_name_to_id['Box Level 6'] will map to '10'
+        # section_name_to_id['Box Level 6'] will get '10'
         self.section_name_to_id = {}
         # Maps section id to row name, and each row name is a dict that maps to 
         # row id. Use this to find the row id given the section id and row name
         # For example, if section 216 has a row with name 'a', and this row name
         # has row id '1',
-        # section_id_to_row['216'] will map to {'a':'1'}
+        # section_id_to_row['216'] will get {'a':'1'}, and 
+        # section_id_to_row['216']['a'] will get '1'.
         self.section_id_to_row = {}
 
     def read_manifest(self, manifest):
@@ -35,9 +36,11 @@ class Normalizer(object):
 
         # Sanitize input
         if not os.path.isfile(manifest):
-            print "The file does not exist, did not read manifest file"
+            print "The file does not exist, did not read manifest file, \
+            no file created"
         elif not manifest.endswith(".csv"):
-            print "The file is not in CSV format, did not read manifest file"
+            print "The file is not in CSV format, did not read manifest file, \
+            no file created"
 
         with open(manifest, 'rb') as csvfile:
             # Skip the first line because they are labels for the columns
@@ -68,6 +71,7 @@ class Normalizer(object):
                 else:
                     # Case where section name has no digits
                     digits_only = section_name.strip()
+                    section_name = orig_section_name
 
                 # Add numerical part of section name as key, alphabetical
                 # part of section name as value to section_name_to_id dict
@@ -82,8 +86,6 @@ class Normalizer(object):
                     self.section_id_to_row[section_id][row_name] = row_id
                 else:
                     self.section_id_to_row[section_id] = {row_name: row_id}
-        print "section_id_to_row ", str(self.section_id_to_row)
-        print "section_name_to_id ", str(self.section_name_to_id)
 
     def compare_letters_with_phrase(self, letters, phrase):
         """Compares letters with phrase to see whether the letters
@@ -103,6 +105,7 @@ class Normalizer(object):
         """
 
         tmp_phrase = phrase
+
         while len(letters) > 0:
             found = tmp_phrase.find(letters[0])
             if found > -1:
@@ -112,11 +115,12 @@ class Normalizer(object):
                 return
         return phrase
 
-    def find_closest_word(self, section, set_of_names):
+    def find_closest_match(self, section, digits_only, set_of_names):
         """Finds given section name in set_of_names
 
         Input:
             section - section name to be found in set_of_names
+            digits_only - digit-only part of the section name
             set_of_names - set of names to which the digit in the
                 original section name corresponds
 
@@ -125,14 +129,12 @@ class Normalizer(object):
             section_name_to_id lookup
         """
 
-        # Find the word-only section name
-        digits_only = re.findall("\d+", section)
-        if len(digits_only) > 0:
-            digits_only = digits_only[0]
-            section = section.replace(digits_only, "").strip()
+        section = section.lower()
 
         # Check whether section name is as is in the set of names
         if section in set_of_names:
+            if section == digits_only:
+                return section
             return section + " " + digits_only
 
         # Iterate through all the phrases in set_of_names
@@ -180,7 +182,7 @@ class Normalizer(object):
                     if result is not None:
                         return result + " " + digits_only
 
-        return section
+        return None
 
     def normalize(self, section, row):
         """normalize a single (section, row) input
@@ -196,43 +198,74 @@ class Normalizer(object):
             row {[type]} -- [description]
         """
         # Outputs
-        section_name = None
+        section_id = None
         row_id = None
         valid = False
 
         # Get rid of leading zeroes from the input
-        section = section.lstrip("0").lower()
+        orig_section = section.lstrip("0").lower()
         row = row.lstrip("0").lower()
 
-        # Find the section_number
-        section_number = re.findall("\d+", section)
-        if len(section_number) > 0:
-            section_number = section_number[0].lstrip("0")
-        else:
-            section_number = None
+        # Other variables used in this function
+        section_number = None
+    
+        # Try to find match with only the number in section name
+        all_digits = re.findall("\d+", section)
+        if len(all_digits) > 0:
+            digit_in_section_name = all_digits[0]
+            section_names = self.section_name_mapper.get(digit_in_section_name)
+            if section_names is not None:
+                section_number = self.find_closest_match(digit_in_section_name,\
+                digit_in_section_name, section_names)
 
-        # Find the section_name
-        if section_number is not None:
-            section_name = self.section_name_mapper[section_number]
-            if len(section_name) == 1:
-                section_name = section_name.pop()
-                self.section_name_mapper[section_number].add(section_name)
-                if section_name != section_number:
-                    section_number = section_name + " " + section_number
+            # Did not succeed in finding a section_number
+            # If the set of section_names only has one item, try looking for 
+            # it in section_name_mapper
+            if section_number is None and len(section_names) == 1:
+                only_one_section_name = section_names.pop()
+                self.section_name_mapper[digit_in_section_name] \
+                = [only_one_section_name]
+                section_number = only_one_section_name + " " + digit_in_section_name
+                if self.section_name_to_id.get(section_number) is None:
+                    section_number = None
+
+        # Still couldn't find a section_number, look through all words in 
+        # section name and set of section names
+        if section_number is None:
+            # Find the section_number
+            section_number = re.findall("\d+", section)
+            if len(section_number) > 0:
+                section_number = section_number[0].lstrip("0")
             else:
-                section_number = self.find_closest_word(section, \
-                self.section_name_mapper[section_number])
-        
-        # Get the section_id
-        section_id = self.section_name_to_id.get(section_number)
+                section_number = section
 
-        # Get the row_id
-        if section_id is not None:
-            section_id = section_id.lstrip("0")
-            row_id = self.section_id_to_row.get(section_id).get(row)
-            section_id = int(section_id)
-        if row_id is not None:
-            row_id = int(row_id)
-            valid = True
+            # Find the word-only section name
+            digits_only = re.findall("\d+", section)
+            if len(digits_only) > 0:
+                digits_only = digits_only[0]
+                orig_section = section
+                section = section.replace(digits_only, "").strip()
+                if section == '':
+                    section = orig_section
+            
+            # Find the section names for the section number
+            section_names = self.section_name_mapper.get(section_number)
+            if section_names is not None:
+                section_number = self.find_closest_match(section, \
+                digits_only, section_names)
+
+        # Found section number for given section name
+        if section_number is not None:
+            # Get the section_id
+            section_id = self.section_name_to_id.get(section_number)
+
+            # Get the row_id
+            if section_id is not None:
+                section_id = section_id.lstrip("0")
+                row_id = self.section_id_to_row.get(section_id).get(row)
+                section_id = int(section_id)
+            if row_id is not None:
+                row_id = int(row_id)
+                valid = True
 
         return (section_id, row_id, valid)
